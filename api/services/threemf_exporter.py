@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import zipfile
-from xml.etree.ElementTree import Element, SubElement, tostring
 
 import numpy as np
 import trimesh
@@ -164,7 +163,6 @@ def _numpy_kmeans(
 # ---------------------------------------------------------------------------
 
 _NS_3MF = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-_NS_MAT = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
 
 _CONTENT_TYPES_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -181,7 +179,7 @@ _RELS_XML = """\
 
 
 def _color_hex(rgb: np.ndarray) -> str:
-    return "#{:02X}{:02X}{:02X}".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+    return "#{:02X}{:02X}{:02X}FF".format(int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
 
 def _build_3mf(
@@ -189,61 +187,56 @@ def _build_3mf(
     palette: np.ndarray,
     labels: np.ndarray,
 ) -> bytes:
-    """Assemble the .3mf ZIP archive."""
+    """Assemble the .3mf ZIP archive.
 
+    Builds the 3dmodel.model XML by hand (no ElementTree) so we have
+    exact control over namespace declarations and attribute order, which
+    matters for Bambu Studio's parser.
+    """
     vertices = mesh.vertices
     faces = mesh.faces
+    parts: list[str] = []
+    w = parts.append
 
-    # -- Build XML model --------------------------------------------------
-    model = Element("model")
-    model.set("xmlns", _NS_3MF)
-    model.set("xmlns:m", _NS_MAT)
-    model.set("unit", "millimeter")
-    model.set("xml:lang", "en-US")
+    w('<?xml version="1.0" encoding="UTF-8"?>')
+    w('<model unit="millimeter" xml:lang="en-US" '
+      'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+      'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">')
+    w('<resources>')
 
-    resources = SubElement(model, "resources")
-
-    # Base materials (one per palette colour)
-    basematerials = SubElement(resources, "m:basematerials")
-    basematerials.set("id", "1")
+    # colorgroup — one <m:color> per palette colour (Bambu Studio requires
+    # m:colorgroup, it ignores core basematerials)
+    w('<m:colorgroup id="1">')
     for rgb in palette:
-        base = SubElement(basematerials, "m:base")
-        base.set("name", _color_hex(rgb))
-        base.set("displaycolor", _color_hex(rgb))
+        w(f'<m:color color="{_color_hex(rgb)}" />')
+    w('</m:colorgroup>')
 
-    # Object containing the mesh
-    obj = SubElement(resources, "object")
-    obj.set("id", "2")
-    obj.set("type", "model")
+    # object with default material (pid/pindex required by spec)
+    w('<object id="2" type="model" pid="1" pindex="0">')
+    w('<mesh>')
 
-    mesh_el = SubElement(obj, "mesh")
-
-    # Vertices
-    verts_el = SubElement(mesh_el, "vertices")
+    # vertices
+    w('<vertices>')
     for v in vertices:
-        vert = SubElement(verts_el, "vertex")
-        vert.set("x", f"{v[0]:.6f}")
-        vert.set("y", f"{v[1]:.6f}")
-        vert.set("z", f"{v[2]:.6f}")
+        w(f'<vertex x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}" />')
+    w('</vertices>')
 
-    # Triangles with material assignment
-    tris_el = SubElement(mesh_el, "triangles")
+    # triangles with per-face material
+    w('<triangles>')
     for i, face in enumerate(faces):
-        tri = SubElement(tris_el, "triangle")
-        tri.set("v1", str(int(face[0])))
-        tri.set("v2", str(int(face[1])))
-        tri.set("v3", str(int(face[2])))
-        tri.set("pid", "1")  # references basematerials id="1"
-        tri.set("p1", str(int(labels[i])))
+        w(f'<triangle v1="{int(face[0])}" v2="{int(face[1])}" '
+          f'v3="{int(face[2])}" pid="1" p1="{int(labels[i])}" />')
+    w('</triangles>')
 
-    # Build item
-    build = SubElement(model, "build")
-    item = SubElement(build, "item")
-    item.set("objectid", "2")
+    w('</mesh>')
+    w('</object>')
+    w('</resources>')
+    w('<build>')
+    w('<item objectid="2" />')
+    w('</build>')
+    w('</model>')
 
-    # -- Serialise XML ----------------------------------------------------
-    xml_declaration = b'<?xml version="1.0" encoding="UTF-8"?>\n'
-    model_xml = xml_declaration + tostring(model, encoding="unicode").encode("utf-8")
+    model_xml = "\n".join(parts).encode("utf-8")
 
     # -- Pack into ZIP ----------------------------------------------------
     buf = io.BytesIO()
