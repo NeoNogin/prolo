@@ -205,7 +205,7 @@ export default function GenerationHUD(): JSX.Element | null {
                   onChange={(e) => setExportFormat(e.target.value)}
                   className="px-2 py-2 rounded-xl bg-zinc-800 border border-zinc-700/50 text-zinc-300 text-xs font-medium focus:outline-none focus:border-zinc-500 transition-colors cursor-pointer"
                 >
-                  {['glb', 'stl', 'obj', 'ply'].map((f) => (
+                  {['glb', 'stl', 'obj', 'ply', '3mf'].map((f) => (
                     <option key={f} value={f}>{f.toUpperCase()}</option>
                   ))}
                 </select>

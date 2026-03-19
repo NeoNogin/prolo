@@ -8,7 +8,7 @@ from services.generator_registry import WORKSPACE_DIR
 
 router = APIRouter(tags=["export"])
 
-SUPPORTED = {"glb", "stl", "obj", "ply"}
+SUPPORTED = {"glb", "stl", "obj", "ply", "3mf"}
 
 
 @router.get("/{fmt}")
@@ -33,6 +33,16 @@ def export_mesh(fmt: str, path: str):
         mesh = trimesh.util.concatenate(geoms) if len(geoms) > 1 else geoms[0]
     else:
         mesh = loaded
+
+    # 3MF — multi-colour export for Bambu Lab / AMS printers
+    if fmt == "3mf":
+        from services.threemf_exporter import export_3mf
+        data = export_3mf(mesh)
+        return Response(
+            content=data,
+            media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+            headers={"Content-Disposition": "attachment; filename=model.3mf"},
+        )
 
     buf = io.BytesIO()
     if fmt == "stl":
